@@ -1,0 +1,97 @@
+#define BLYNK_TEMPLATE_ID "TMPL5wT7hXx6D"
+#define BLYNK_TEMPLATE_NAME "esp32 acc"
+#define BLYNK_AUTH_TOKEN "zUgI4HIhkZ-rdk4YvUGhyseVLJ6wg6fm"
+
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <BlynkSimpleEsp32.h>
+#include <Adafruit_MPU6050.h>
+
+char auth[] = BLYNK_AUTH_TOKEN;
+char ssid[] = "nom wifi";
+char pass[] = "mot de passe wiffi";
+
+Adafruit_MPU6050 mpu;
+float seuilAlerte = 15.0; // Seuil de vibration critique
+
+float seuilCritique = 5.0; // Seuil de vibration (après retrait gravité)
+int led_stat=0;
+
+void setup() {
+ // Serial.begin(115200);
+  //Blynk.begin(auth, ssid, pass);
+  
+  //if (!mpu.begin()) {
+  //  while (1) { delay(10); }
+  //}
+ 
+  Serial.begin(115200);
+  delay(1000);
+  Serial.println("--- DEBUT DU PROGRAMME ---");
+
+  // On initialise le WiFi manuellement pour ne pas rester bloqué
+  Serial.println("Tentative WiFi...");
+  WiFi.begin(ssid, pass); 
+  
+  // On n'attend que 10 secondes maximum
+  int timer = 0;
+  while (WiFi.status() != WL_CONNECTED && timer < 20) {
+    delay(500);
+    Serial.print(".");
+    timer++;
+  }
+
+  if(WiFi.status() == WL_CONNECTED){
+    Serial.println("\nWiFi Connecté !");
+    Blynk.config(auth); // On configure Blynk sans bloquer
+  } else {
+    Serial.println("\nECHEC WiFi : Le programme continue en mode local.");
+  }
+
+  Serial.println("Initialisation MPU6050...");
+  if (!mpu.begin()) {
+    Serial.println("ERREUR : Capteur non trouvé !");
+    while (1); 
+  }
+  Serial.println("MPU6050 OK !");
+}
+
+
+void loop() {
+  if (WiFi.status() == WL_CONNECTED) {
+    Blynk.run();
+  }
+
+  sensors_event_t a, g, temp;
+  mpu.getEvent(&a, &g, &temp);
+
+  // 1. Calcul de la magnitude brute
+  float brute = sqrt(pow(a.acceleration.x, 2) + pow(a.acceleration.y, 2) + pow(a.acceleration.z, 2));
+
+  // 2. Filtrage de la gravité (On veut 0 quand ça ne bouge pas)
+  // On utilise abs() pour avoir une valeur positive de vibration
+  float vibrationNette = abs(brute - 9.81); 
+
+  // 3. Petit filtre pour ignorer le bruit électronique (en dessous de 0.5, on affiche 0)
+  if (vibrationNette < 0.5) vibrationNette = 0;
+  // --- LOGIQUE DE LA LED ---
+  if (vibrationNette > seuilCritique) {
+    //digitalWrite(pinLED, HIGH); // Allume la LED
+    led_stat=255;
+    Blynk.logEvent("alerte_machine", "Vibration critique détectée !");
+  } else {
+    //digitalWrite(pinLED, LOW);  // Éteint la LED si tout va bien
+    led_stat=0;
+  }
+
+  // 4. Envoi à Blynk toutes les 500ms pour une fluidité parfaite
+  static unsigned long lastMillis = 0;
+  if (millis() - lastMillis > 500) {
+    if (Blynk.connected()) {
+       Blynk.virtualWrite(V1, vibrationNette); // Envoi sur le Pin Virtuel V1
+       delay(100);
+       Blynk.virtualWrite(V2, led_stat);
+    }
+    lastMillis = millis();
+  }
+}
